@@ -5,7 +5,10 @@ from models.models import Document, DocumentChunk, DocumentChunkMetadata
 
 import tiktoken
 
-from services.openai import get_embeddings
+from services.openai_calls import get_embeddings
+from datetime import datetime
+import pytz
+
 
 # Global variables
 tokenizer = tiktoken.get_encoding(
@@ -22,7 +25,7 @@ EMBEDDINGS_BATCH_SIZE = int(
 MAX_NUM_CHUNKS = 10000  # The maximum number of chunks to generate from a text
 
 
-def get_text_chunks(text: str, chunk_token_size: Optional[int]) -> List[str]:
+def get_text_chunks(text: str, chunk_token_size: Optional[int]) -> Tuple[List[str], int]:
     """
     Split a text into chunks of ~CHUNK_SIZE tokens, based on punctuation and newline boundaries.
 
@@ -39,6 +42,7 @@ def get_text_chunks(text: str, chunk_token_size: Optional[int]) -> List[str]:
 
     # Tokenize the text
     tokens = tokenizer.encode(text, disallowed_special=())
+    n_tokens = len(tokens)
 
     # Initialize an empty list of chunks
     chunks = []
@@ -96,7 +100,7 @@ def get_text_chunks(text: str, chunk_token_size: Optional[int]) -> List[str]:
         if len(remaining_text) > MIN_CHUNK_LENGTH_TO_EMBED:
             chunks.append(remaining_text)
 
-    return chunks
+    return chunks, n_tokens
 
 
 def create_document_chunks(
@@ -108,7 +112,6 @@ def create_document_chunks(
     Args:
         doc: The document object to create chunks from. It should have a text attribute and optionally an id and a metadata attribute.
         chunk_token_size: The target size of each chunk in tokens, or None to use the default CHUNK_SIZE.
-
     Returns:
         A tuple of (doc_chunks, doc_id), where doc_chunks is a list of document chunks, each of which is a DocumentChunk object with an id, a document_id, a text, and a metadata attribute,
         and doc_id is the id of the document object, generated if not provided. The id of each chunk is generated from the document id and a sequential number, and the metadata is copied from the document object.
@@ -121,26 +124,33 @@ def create_document_chunks(
     doc_id = doc.id or str(uuid.uuid4())
 
     # Split the document text into chunks
-    text_chunks = get_text_chunks(doc.text, chunk_token_size)
-
-    metadata = (
-        DocumentChunkMetadata(**doc.metadata.__dict__)
-        if doc.metadata is not None
-        else DocumentChunkMetadata()
-    )
-
-    metadata.document_id = doc_id
+    text_chunks, total_tokens = get_text_chunks(doc.text, chunk_token_size)
 
     # Initialize an empty list of chunks for this document
     doc_chunks = []
 
+    created_at = datetime.now(tz=pytz.timezone("UTC")).strftime("%Y-%m-%d %H:%M:%S")
+
     # Assign each chunk a sequential number and create a DocumentChunk object
     for i, text_chunk in enumerate(text_chunks):
         chunk_id = f"{doc_id}_{i}"
+        chunk_tokens = len(tokenizer.encode(text_chunk, disallowed_special=()))
+
+        dct_metadata = {
+            'document_id': doc_id,
+            'chunk_tokens': chunk_tokens, 'total_tokens': total_tokens, 'total_chunks': len(text_chunks),
+            'created_at': created_at,
+        }
+
+        if doc.metadata is not None:
+            for _k, _v in doc.metadata.__dict__.items():
+                if _v is not None and _k not in dct_metadata:
+                    dct_metadata[_k] = _v
+
         doc_chunk = DocumentChunk(
             id=chunk_id,
             text=text_chunk,
-            metadata=metadata,
+            metadata=DocumentChunkMetadata(**dct_metadata),
         )
         # Append the chunk object to the list of chunks for this document
         doc_chunks.append(doc_chunk)

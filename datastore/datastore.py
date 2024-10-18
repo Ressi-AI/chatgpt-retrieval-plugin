@@ -1,6 +1,9 @@
+import os
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 import asyncio
+from loguru import logger
+from time import sleep
 
 from models.models import (
     Document,
@@ -10,8 +13,13 @@ from models.models import (
     QueryResult,
     QueryWithEmbedding,
 )
-from services.chunks import get_document_chunks
-from services.openai import get_embeddings
+if True:
+    from services.langchain_chunks import get_document_chunks
+else:
+    from services.chunks import get_document_chunks
+from services.openai_calls import get_embeddings
+
+EMBEDDING_DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", 256))
 
 
 class DataStore(ABC):
@@ -83,4 +91,67 @@ class DataStore(ABC):
         Multiple parameters can be used at once.
         Returns whether the operation was successful.
         """
+        raise NotImplementedError
+
+    async def _batch_update_metadata(self, documents: List[Document], batch_size=100):
+        nr_documents = len(documents)
+        if nr_documents % batch_size == 0:
+            nr_batches = nr_documents // batch_size
+        else:
+            nr_batches = 1 + nr_documents // batch_size
+
+        logger.info(f"Updating metadata for {nr_batches} batches (batch_size={batch_size}) ...")
+        for batch_idx in range(nr_batches):
+            batch_start = batch_idx * batch_size
+            batch_end = (batch_idx + 1) * batch_size
+            batch_documents = documents[batch_start:batch_end]
+            sleep(1.0)
+            await asyncio.gather(
+                *[
+                    self._update_metadata(document=document)
+                    for document in batch_documents
+                    if document.id and document.metadata
+                ]
+            )
+            logger.info(f"Batch {batch_idx+1}/{nr_batches} completed.")
+
+        return
+
+    async def update_metadata(self, documents: List[Document], direct=True, update_batch_size=100):
+        if direct:
+            await self._batch_update_metadata(documents=documents, batch_size=update_batch_size)
+            return
+
+        queries_with_embeddings = [
+            QueryWithEmbedding(
+                query='', filter=DocumentMetadataFilter(document_id=d.id),
+                top_k=1, embedding=[0.0 for _ in range(EMBEDDING_DIMENSION)]
+            )
+            for d in documents
+        ]
+        queries_results = await self._query(queries_with_embeddings)
+        chunk_documents = []
+        for i, r in enumerate(queries_results):
+            if len(r.results) == 0:
+                logger.error(f"No query result for document {documents[i].id}")
+                continue
+
+            top_result = r.results[0]
+            if top_result.metadata.total_chunks is None:
+                logger.error(f"No total chunks for document {documents[i].id}")
+                continue
+
+            total_chunks = int(top_result.metadata.total_chunks)
+            for j in range(total_chunks):
+                chunk_documents.append(Document(
+                    id=f"{documents[i].id}_{j}",
+                    text=documents[i].text,
+                    metadata=documents[i].metadata,
+                ))
+
+        await self._batch_update_metadata(documents=chunk_documents, batch_size=update_batch_size)
+        return
+
+    @abstractmethod
+    async def _update_metadata(self, document: Document):
         raise NotImplementedError

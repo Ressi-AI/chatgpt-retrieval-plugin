@@ -1,6 +1,7 @@
 from typing import List
-import openai
 import os
+import decouple
+import openai
 from loguru import logger
 
 from tenacity import retry, wait_random_exponential, stop_after_attempt
@@ -23,21 +24,18 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
     Raises:
         Exception: If the OpenAI API call fails.
     """
-    # Call the OpenAI API to get the embeddings
-    # NOTE: Azure Open AI requires deployment id
-    deployment = os.environ.get("OPENAI_EMBEDDINGMODEL_DEPLOYMENTID")
 
-    response = {}
-    if deployment is None:
-        response = openai.Embedding.create(input=texts, model=EMBEDDING_MODEL, dimensions=EMBEDDING_DIMENSION)
+    if decouple.config("USE_AZURE_OPENAI", cast=bool, default=False):
+        # azure deployment created with the same name as model name
+        client = openai.AzureOpenAI(azure_deployment=EMBEDDING_MODEL)
     else:
-        response = openai.Embedding.create(input=texts, deployment_id=deployment)
+        client = openai.OpenAI()
 
-    # Extract the embedding data from the response
-    data = response["data"]  # type: ignore
+    response = client.embeddings.create(input=texts, model=EMBEDDING_MODEL, dimensions=EMBEDDING_DIMENSION)
+    data = response.data
 
     # Return the embeddings as a list of lists of floats
-    return [result["embedding"] for result in data]
+    return [result.embedding for result in data]
 
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(3))

@@ -7,6 +7,7 @@ from loguru import logger
 
 from datastore.datastore import DataStore
 from models.models import (
+    Document,
     DocumentChunk,
     DocumentChunkMetadata,
     DocumentChunkWithScore,
@@ -25,8 +26,8 @@ assert PINECONE_API_KEY is not None
 assert PINECONE_ENVIRONMENT is not None
 assert PINECONE_INDEX is not None
 
-# Initialize Pinecone with the API key and environment
-pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+# Initialize Pinecone with the API key
+pc = pinecone.Pinecone(api_key=PINECONE_API_KEY)
 
 # Set the batch size for upserting vectors to Pinecone
 UPSERT_BATCH_SIZE = 100
@@ -34,10 +35,13 @@ UPSERT_BATCH_SIZE = 100
 EMBEDDING_DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", 256))
 
 
+# TODO ServerlessSpec does not allow metadata_config={"indexed": fields_to_index}
+
 class PineconeDataStore(DataStore):
     def __init__(self):
         # Check if the index name is specified and exists in Pinecone
-        if PINECONE_INDEX and PINECONE_INDEX not in pinecone.list_indexes():
+        indexes = [i.name for i in pc.list_indexes().indexes]
+        if PINECONE_INDEX and PINECONE_INDEX not in indexes:
             # Get all fields in the metadata object in a list
             fields_to_index = list(DocumentChunkMetadata.__fields__.keys())
 
@@ -46,21 +50,24 @@ class PineconeDataStore(DataStore):
                 logger.info(
                     f"Creating index {PINECONE_INDEX} with metadata config {fields_to_index}"
                 )
-                pinecone.create_index(
+                pc.create_index(
                     PINECONE_INDEX,
                     dimension=EMBEDDING_DIMENSION,
-                    metadata_config={"indexed": fields_to_index},
+                    spec=pinecone.PodSpec(
+                        environment=PINECONE_ENVIRONMENT,
+                        metadata_config={"indexed": fields_to_index},
+                    )
                 )
-                self.index = pinecone.Index(PINECONE_INDEX)
+                self.index = pc.Index(PINECONE_INDEX)
                 logger.info(f"Index {PINECONE_INDEX} created successfully")
             except Exception as e:
                 logger.error(f"Error creating index {PINECONE_INDEX}: {e}")
                 raise e
-        elif PINECONE_INDEX and PINECONE_INDEX in pinecone.list_indexes():
+        elif PINECONE_INDEX and PINECONE_INDEX in indexes:
             # Connect to an existing index with the specified name
             try:
                 logger.info(f"Connecting to existing index {PINECONE_INDEX}")
-                self.index = pinecone.Index(PINECONE_INDEX)
+                self.index = pc.Index(PINECONE_INDEX)
                 logger.info(f"Connected to index {PINECONE_INDEX} successfully")
             except Exception as e:
                 logger.error(f"Error connecting to index {PINECONE_INDEX}: {e}")
@@ -244,6 +251,8 @@ class PineconeDataStore(DataStore):
                         "created_at", {}
                     )
                     pinecone_filter["created_at"]["$lte"] = to_unix_timestamp(value)
+                elif field == "extra_filters":
+                    pinecone_filter = {**pinecone_filter, **value}
                 else:
                     pinecone_filter[field] = value
 
@@ -267,3 +276,14 @@ class PineconeDataStore(DataStore):
                     pinecone_metadata[field] = value
 
         return pinecone_metadata
+
+    async def _update_metadata(self, document: Document):
+        try:
+            self.index.update(
+                id=document.id,
+                set_metadata=self._get_pinecone_metadata(metadata=document.metadata)
+            )
+        except Exception as e:
+            logger.error(f"Error updating metadata for document with id: {document.id}")
+            raise e
+        return True

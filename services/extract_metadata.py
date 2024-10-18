@@ -1,5 +1,5 @@
 from models.models import Source
-from services.openai import get_chat_completion
+from services.openai_calls import get_chat_completion
 import json
 from typing import Dict
 import os

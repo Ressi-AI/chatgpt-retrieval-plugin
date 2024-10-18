@@ -8,7 +8,6 @@ import docx2txt
 import csv
 import pptx
 from loguru import logger
-
 from models.models import Document, DocumentMetadata
 
 
@@ -39,7 +38,7 @@ def extract_text_from_filepath(filepath: str, mimetype: Optional[str] = None) ->
         with open(filepath, "rb") as file:
             extracted_text = extract_text_from_file(file, mimetype)
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Could not extract text from file {filepath} (mimetype={mimetype})")
         raise e
 
     return extracted_text
