@@ -24,7 +24,8 @@ EMBEDDING_DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", 256))
 
 class DataStore(ABC):
     async def upsert(
-        self, documents: List[Document], chunk_token_size: Optional[int] = None
+        self, documents: List[Document], chunk_token_size: Optional[int] = None,
+        delete_existing: Optional[bool] = True,
     ) -> List[str]:
         """
         Takes in a list of documents and inserts them into the database.
@@ -32,18 +33,19 @@ class DataStore(ABC):
         Return a list of document ids.
         """
         # Delete any existing vectors for documents with the input document ids
-        await asyncio.gather(
-            *[
-                self.delete(
-                    filter=DocumentMetadataFilter(
-                        document_id=document.id,
-                    ),
-                    delete_all=False,
-                )
-                for document in documents
-                if document.id
-            ]
-        )
+        if delete_existing:
+            await asyncio.gather(
+                *[
+                    self.delete(
+                        filter=DocumentMetadataFilter(
+                            document_id=document.id,
+                        ),
+                        delete_all=False,
+                    )
+                    for document in documents
+                    if document.id
+                ]
+            )
 
         chunks = get_document_chunks(documents, chunk_token_size)
 
@@ -97,10 +99,15 @@ class DataStore(ABC):
         nr_documents = len(documents)
         if nr_documents % batch_size == 0:
             nr_batches = nr_documents // batch_size
+            last_batch_size = batch_size
         else:
             nr_batches = 1 + nr_documents // batch_size
+            last_batch_size = nr_documents % batch_size
 
-        logger.info(f"Updating metadata for {nr_batches} batches (batch_size={batch_size}) ...")
+        logger.info((
+            f"Updating metadata for {nr_batches} batches "
+            f"(batch_size={batch_size}, last_batch_size={last_batch_size}) ..."
+        ))
         for batch_idx in range(nr_batches):
             batch_start = batch_idx * batch_size
             batch_end = (batch_idx + 1) * batch_size

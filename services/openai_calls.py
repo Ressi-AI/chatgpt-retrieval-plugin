@@ -3,7 +3,7 @@ import os
 import decouple
 import openai
 from loguru import logger
-
+import airouter.models
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-large")
@@ -25,7 +25,7 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
         Exception: If the OpenAI API call fails.
     """
 
-    if decouple.config("USE_AZURE_OPENAI", cast=bool, default=False):
+    if decouple.config("DEFAULT_LLM_PROVIDER", default=None) == airouter.models.ProviderName.AZURE_OPENAI:
         # azure deployment created with the same name as model name
         client = openai.AzureOpenAI(azure_deployment=EMBEDDING_MODEL)
     else:

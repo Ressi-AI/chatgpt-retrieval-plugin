@@ -18,7 +18,7 @@ class DocumentMetadata(BaseModel):
     source: Optional[Source] = None
     source_id: Optional[str] = None
     url: Optional[str] = None
-    created_at: Optional[str] = None
+    created_at: Optional[Union[str, float]] = None
     author: Optional[str] = None
     # ressi-updated
     title: Optional[str] = None
@@ -28,6 +28,7 @@ class DocumentMetadata(BaseModel):
     company_id: Optional[Union[str, int]] = None
     collection_id: Optional[Union[str, int]] = None
     public: Optional[bool] = None
+    active: Optional[bool] = None
 
 
 class DocumentChunkMetadata(DocumentMetadata):
@@ -66,8 +67,11 @@ class DocumentMetadataFilter(BaseModel):
     end_date: Optional[str] = None  # any date string format
     # ressi-updated
     title: Optional[str] = None
-    user_id: Optional[str] = None
+    user_id: Optional[Union[str, int]] = None
+    company_id: Optional[Union[str, int]] = None
+    collection_id: Optional[Union[str, int]] = None
     public: Optional[bool] = None
+    active: Optional[bool] = None
     extra_filters: Optional[Dict] = None  # other filters specific to the datastore (e.g. pinecone can receive $or, $and etc.) # noqa: E501
 
 

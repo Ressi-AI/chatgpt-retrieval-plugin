@@ -8,6 +8,7 @@ from loguru import logger
 from datastore.datastore import DataStore
 from models.models import (
     Document,
+    DocumentMetadata,
     DocumentChunk,
     DocumentChunkMetadata,
     DocumentChunkWithScore,
@@ -72,6 +73,11 @@ class PineconeDataStore(DataStore):
             except Exception as e:
                 logger.error(f"Error connecting to index {PINECONE_INDEX}: {e}")
                 raise e
+
+        self.is_serverless = "serverless" in self.index._config.host.lower()
+        if self.is_serverless:
+            logger.info(f"{PINECONE_INDEX} is a serverless index")
+        return
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(3))
     async def _upsert(self, chunks: Dict[str, List[DocumentChunk]]) -> List[str]:
@@ -201,7 +207,7 @@ class PineconeDataStore(DataStore):
                 return True
             except Exception as e:
                 logger.error(f"Error deleting all vectors: {e}")
-                raise e
+                return False
 
         # Convert the metadata filter object to a dict with pinecone filter expressions
         pinecone_filter = self._get_pinecone_filter(filter)
@@ -213,18 +219,29 @@ class PineconeDataStore(DataStore):
                 logger.info(f"Deleted vectors with filter successfully")
             except Exception as e:
                 logger.error(f"Error deleting vectors with filter: {e}")
-                raise e
+                return False
 
         # Delete vectors that match the document ids from the index if the ids list is not empty
         if ids is not None and len(ids) > 0:
-            try:
-                logger.info(f"Deleting vectors with ids {ids}")
-                pinecone_filter = {"document_id": {"$in": ids}}
-                self.index.delete(filter=pinecone_filter)  # type: ignore
-                logger.info(f"Deleted vectors with ids successfully")
-            except Exception as e:
-                logger.error(f"Error deleting vectors with ids: {e}")
-                raise e
+            if not self.is_serverless:
+                try:
+                    logger.info(f"Deleting vectors with ids {ids}")
+                    pinecone_filter = {"document_id": {"$in": ids}}
+                    self.index.delete(filter=pinecone_filter)  # type: ignore
+                    logger.info(f"Deleted vectors with ids successfully")
+                except Exception as e:
+                    logger.error(f"Error deleting vectors with ids: {e}")
+                    return False
+            else:
+                try:
+                    logger.info(f"Deleting vectors with ids {ids}, by updating metadata (serverless)")
+                    await self.update_metadata(
+                        documents=[Document(id=i, text='', metadata=DocumentMetadata(active=False)) for i in ids],
+                        direct=False
+                    )
+                except Exception as e:
+                    logger.error(f"Error deleting vectors (serverless) with ids: {e}")
+                    return False
 
         return True
 
