@@ -1,6 +1,6 @@
 from typing import List
 import os
-import decouple
+from decouple import config as environ
 import openai
 from loguru import logger
 import airouter.models
@@ -25,7 +25,7 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
         Exception: If the OpenAI API call fails.
     """
 
-    if decouple.config("DEFAULT_LLM_PROVIDER", default=None) == airouter.models.ProviderName.AZURE_OPENAI:
+    if environ("EMBEDDING_PROVIDER", default=None) == airouter.models.ProviderName.AZURE_OPENAI:
         # azure deployment created with the same name as model name
         client = openai.AzureOpenAI(azure_deployment=EMBEDDING_MODEL)
     else:
